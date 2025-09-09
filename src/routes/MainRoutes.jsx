@@ -31,7 +31,7 @@ const agentChildren = [
   // { path: "reports/performance", element: <Performance /> }, 
   // { path: "reports/activity", element: <Activity /> }, 
 ];
-const customerChildren = [{ path: "", index: true, element: <Home /> }];
+const customerChildren = [{ path: "/login", index: true, element: <Home /> }];
 
 // ✅ Main Router
 const routers = createBrowserRouter([
