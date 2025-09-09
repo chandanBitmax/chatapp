@@ -7,7 +7,7 @@ export const connectSocket = () => {
   const token = localStorage.getItem("token");
 
   if (!socket || !socket.connected) {
-    socket = io("http://localhost:5003", {
+    socket = io("https://livechatcrm-byj4.onrender.com", {
       auth: { token },   // ✅ match backend socket.handshake.auth.token
       transports: ["websocket"],
     });
