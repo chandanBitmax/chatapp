@@ -92,7 +92,7 @@ export const menuData = {
         ]
     }],
     Customer: [
-    { name: "Home", icon: Home, route: "/" },
+    { name: "Home", icon: Home, route: "/login" },
     { name: "Chat", icon: Forum, route: "/chat" },
     { name: "Inbox", icon: Inbox, route: "/inbox" },
   ],
