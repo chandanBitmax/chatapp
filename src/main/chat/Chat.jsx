@@ -23,7 +23,7 @@ import { useGetAllCustomerQuery } from "../../features/auth/authApi";
 import Profile from "../../pages/private/profile/Profile";
 import StyledBadge from "../../components/common/StyledBadge";
 
-const IMG_BASE_URL = "https://chatcrmapi.onrender.com/uploads/profile";
+const IMG_BASE_URL = "https://livechatcrm-byj4.onrender.com/uploads/profile";
 
 const Chat = ({ currentUserId }) => {
   const [tab, setTab] = useState(0);

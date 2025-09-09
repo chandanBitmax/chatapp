@@ -4,7 +4,7 @@ import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 export const ticketApi = createApi({
   reducerPath: 'ticketApi',
   baseQuery: fetchBaseQuery({
-    baseUrl: 'https://chatcrmapi.onrender.com/api/v1', 
+    baseUrl: 'https://livechatcrm-byj4.onrender.com/api/v1', 
     prepareHeaders: (headers, { getState }) => {
       const token = localStorage.getItem('token');
       if (token) headers.set('Authorization', `Bearer ${token}`);

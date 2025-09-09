@@ -4,7 +4,7 @@ import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 export const authApi = createApi({
   reducerPath: 'authApi',
   baseQuery: fetchBaseQuery({
-    baseUrl: 'https://chatcrmapi.onrender.com/api/v1/user', 
+    baseUrl: 'https://livechatcrm-byj4.onrender.com/api/v1/user', 
     prepareHeaders: (headers, { getState }) => {
       const token = localStorage.getItem('token');
       if (token) headers.set('Authorization', `Bearer ${token}`);

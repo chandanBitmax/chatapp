@@ -19,7 +19,7 @@ import { format } from 'date-fns';
 import StyledBadge from '../../../components/common/StyledBadge';
 
 
-const IMG_BASE_URL = 'https://chatcrmapi.onrender.com/uploads/profile';
+const IMG_BASE_URL = 'https://livechatcrm-byj4.onrender.com/uploads/profile';
 
 const ProfileCard = ({ customer, onToggle }) => {
   const navigate = useNavigate();
