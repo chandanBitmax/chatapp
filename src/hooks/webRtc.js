@@ -31,7 +31,21 @@ export default function useWebRTC(roomId) {
     }
 
     const peer = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      iceServers: [
+        // Free Google STUN
+    { urls: "stun:stun.l.google.com:19302" },
+
+    // Public TURN service (Metered.ca free relay)
+    {
+      urls: [
+        "turn:global.relay.metered.ca:80",
+        "turn:global.relay.metered.ca:443",
+        "turns:global.relay.metered.ca:443"
+      ],
+      username: "openai",       // demo username
+      credential: "openai123",  // demo credential
+    },
+      ],
     });
     peerRef.current = peer;
 
