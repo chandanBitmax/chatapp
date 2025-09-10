@@ -8,6 +8,7 @@ export const connectSocket = () => {
 
   if (!socket || !socket.connected) {
     socket = io("https://livechatcrm-byj4.onrender.com", {
+       path: "/socket.io",
       auth: { token },   // ✅ match backend socket.handshake.auth.token
       transports: ["websocket"],
     });
