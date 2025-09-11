@@ -38,12 +38,10 @@ export default function useWebRTC(roomId) {
     // Public TURN service (Metered.ca free relay)
     {
       urls: [
-        "turn:global.relay.metered.ca:80",
-        "turn:global.relay.metered.ca:443",
-        "turns:global.relay.metered.ca:443"
+        "relay1.expressturn.com:3480",
       ],
-      username: "openai",       // demo username
-      credential: "openai123",  // demo credential
+      username: "000000002072935777",       // demo username
+      credential: "5tTjHAYIo7jVOnpxenAl2gIH02Q=",  // demo credential
     },
     
       ],
