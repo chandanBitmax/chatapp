@@ -36,13 +36,13 @@ export default function useWebRTC(roomId) {
     { urls: "stun:stun.l.google.com:19302" },
 
     // Public TURN service (Metered.ca free relay)
-    {
-      urls: [
-        "relay1.expressturn.com:3480",
-      ],
-      username: "000000002072935777",       // demo username
-      credential: "5tTjHAYIo7jVOnpxenAl2gIH02Q=",  // demo credential
-    },
+    // {
+    //   urls: [
+    //     "relay1.expressturn.com:3480",
+    //   ],
+    //   username: "000000002072935777",       // demo username
+    //   credential: "5tTjHAYIo7jVOnpxenAl2gIH02Q=",  // demo credential
+    // },
     
       ],
     });

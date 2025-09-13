@@ -4,15 +4,15 @@ import {
   Grid, Avatar, OutlinedInput, InputAdornment, Typography,
   Stack, IconButton, TextField, CircularProgress
 } from "@mui/material";
-import { Search, Send, Videocam, CallEnd, Call } from "@mui/icons-material";
+import { Search, Send, Videocam, CallEnd, Call, Mic, MicOff, VideocamOff, ScreenShare, StopScreenShare } from "@mui/icons-material";
 import { useGetConversationQuery, useSendMessageMutation } from "../../features/chat/chatApi";
-import {useCreateCallMutation} from "../../features/room/roomApi"
 import { toast } from "react-toastify";
 import { jwtDecode } from "jwt-decode";
 import dayjs from "dayjs";
 import {
   useUpdateCallStatusMutation,
-  useGetCallHistoryQuery
+  useGetCallHistoryQuery,
+  useCreateCallMutation
 } from "../../features/room/roomApi";
 import VideoCallModal from "../../components/call/VideoCallModal";
 
@@ -22,10 +22,26 @@ import ChatSkeleton from "../../components/reusbale/SkeltonCard";
 import { useGetAllCustomerQuery } from "../../features/auth/authApi";
 import Profile from "../../pages/private/profile/Profile";
 import StyledBadge from "../../components/common/StyledBadge";
+import useWebRTC from "../../hooks/webRtc";
+import { getSocket } from "../../hooks/socket";
 
 const IMG_BASE_URL = "https://livechatcrm-byj4.onrender.com/uploads/profile";
 
 const Chat = ({ currentUserId }) => {
+
+  const agentId = "687608347057ea1dfefa7de0";
+  const customerId = "68aa9e4a4e61ea8cf8705a21";
+  
+  const [inCall, setInCall] = useState(false);
+  const [isCalling, setIsCalling] = useState(false);
+  const [roomId, setRoomId] = useState(null);
+  const [muted, setMuted] = useState(false);  
+  const [videoOff, setVideoOff] = useState(false);
+  const [screenSharing, setScreenSharing] = useState(false);
+  const [callTimer, setCallTimer] = useState(0);
+  const [snackbarMsg, setSnackbarMsg] = useState("");
+  const [openSnackbar, setOpenSnackbar] = useState(false);
+
   const [tab, setTab] = useState(0);
   const [selectedUser, setSelectedUser] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -34,16 +50,24 @@ const Chat = ({ currentUserId }) => {
   const [currentDate, setCurrentDate] = useState("");
   const [openVideoCallModal, setOpenVideoCallModal] = useState(false);
 
+  const timerRef = useRef(null);
+  const socket = getSocket();
+
   const containerRef = useRef(null);
 
-  const token = localStorage.getItem("token");
-  const decoded = token ? jwtDecode(token) : null;
-  const agentId = decoded?.id;
+  // const token = localStorage.getItem("token");
+  // const decoded = token ? jwtDecode(token) : null;
+  // const agentId = decoded?.id;
 console.log(agentId);
   // 🔗 API hooks
   const { data: callsData, isLoading: loadingCalls } = useGetCallHistoryQuery();
+
   const [createCall] = useCreateCallMutation();
   console.log(createCall)
+
+   const { localVideoRef, remoteVideoRef, startCall: startWebRTC, endCall } =
+      useWebRTC(roomId);
+
   const calls = callsData?.data || [];
   const { data: customerData } = useGetAllCustomerQuery();
   const customers = customerData?.data || [];
@@ -95,23 +119,23 @@ console.log(agentId);
     );
   }, [messagesData, liveMessages]);
 
-const handleVideoCall = async () => {
-  if(!selectedUser) return toast.error('Please select a user');
+// const handleVideoCall = async () => {
+//   if(!selectedUser) return toast.error('Please select a user');
   
-  try {
-    const roomId = `video-call-${selectedUser?._id}-${agentId}`;
-    console.log("roomId", roomId);
-    await createCall ({ 
-      roomId:"123",
-      callerId: agentId,
-      receiverId: selectedUser?._id
-     }).unwrap();
-    setOpenVideoCallModal(true);
-  } catch (error) {
-    console.log('fail to connect video call', error);
-    toast.error('Failed to connect video call');
-  }
-};
+//   try {
+//     const roomId = `video-call-${selectedUser?._id}-${agentId}`;
+//     console.log("roomId", roomId);
+//     await createCall ({ 
+//       roomId:"123",
+//       callerId: agentId,
+//       receiverId: selectedUser?._id
+//      }).unwrap();
+//     setOpenVideoCallModal(true);
+//   } catch (error) {
+//     console.log('fail to connect video call', error);
+//     toast.error('Failed to connect video call');
+//   }
+// };
 
 
   // --- Detect date headers on scroll
@@ -136,6 +160,183 @@ const handleVideoCall = async () => {
 
     return () => container.removeEventListener("scroll", onScroll);
   }, [combinedMessages]);
+
+  const showSnackbar = (msg) => {
+    setSnackbarMsg(msg);
+    setOpenSnackbar(true);
+  };
+
+    const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, "0")}:${secs
+      .toString()
+      .padStart(2, "0")}`;
+  };
+
+    useEffect(() => {
+      if (!inCall) return;
+      timerRef.current && clearInterval(timerRef.current);
+      setCallTimer(0);
+      timerRef.current = setInterval(() => {
+        setCallTimer((p) => p + 1);
+      }, 1000);
+      return () => {
+        timerRef.current && clearInterval(timerRef.current);
+      };
+    }, [inCall]);
+
+      // Socket lifecycle listeners relevant to caller
+      useEffect(() => {
+        if (!socket) return;
+    
+        const onAccepted = async () => {
+          // At this point the callee has joined the room. roomId is set, hook has re-rendered.
+          showSnackbar("Call accepted. Connecting…");
+          await startWebRTC(); // creates offer, attaches local stream, etc.
+          setInCall(true);
+        };
+    
+        const onRejected = () => {
+          showSnackbar("Call rejected");
+          cleanupCallUI();
+        };
+    
+        const onEnded = () => {
+          showSnackbar("Call ended by remote");
+          handleStopCall(); // ensures peer + streams closed
+        };
+    
+        socket.on("call:accepted", onAccepted);
+        socket.on("call:rejected", onRejected);
+        socket.on("call:ended", onEnded);
+    
+        return () => {
+          socket.off("call:accepted", onAccepted);
+          socket.off("call:rejected", onRejected);
+          socket.off("call:ended", onEnded);
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, [socket, roomId, startWebRTC]);
+
+ const handleVideoCall = async () => {
+    try {
+      setIsCalling(true);
+      showSnackbar("Calling…");
+
+      // 1) Create room on backend
+      const res = await createCall({ receiverId: customerId }).unwrap();
+      const backendRoomId = res?.data?.roomId;
+      if (!backendRoomId) throw new Error("No roomId from backend");
+      setRoomId(backendRoomId);
+
+      // 2) Tell server to ring the customer
+      socket.emit("call:init", {
+        roomId: backendRoomId,
+        from: agentId,
+        receiverId: customerId,
+      });
+
+      setOpenVideoCallModal(true);
+
+      // 3) Do NOT start WebRTC yet.
+      //    Wait for "call:accepted" (see effect above).
+      //    This guarantees the hook re-renders with the new roomId.
+    } catch (err) {
+      console.error("Start call error:", err);
+      showSnackbar("Failed to start call");
+      setIsCalling(false);
+    } finally {
+      setIsCalling(false);
+    }
+  };
+
+    const handleStopCall = () => {
+    // inform server (safe even if already ended)
+    if (roomId) {
+      socket.emit("call:end", { roomId });
+    }
+    // close peer + stop media
+    endCall?.();
+
+    cleanupCallUI();
+    showSnackbar("Call ended");
+  };
+
+   const cleanupCallUI = () => {
+    timerRef.current && clearInterval(timerRef.current);
+    setInCall(false);
+    setRoomId(null);
+    setCallTimer(0);
+    setMuted(false);
+    setVideoOff(false);
+    setScreenSharing(false);
+  };
+
+    const toggleMute = () => {
+    if (localVideoRef.current?.srcObject) {
+      const audioTracks = localVideoRef.current.srcObject.getAudioTracks();
+      if (audioTracks.length) {
+        const next = !audioTracks[0].enabled;
+        audioTracks[0].enabled = next;
+        setMuted(!next);
+      }
+    }
+  };
+
+   const toggleVideo = () => {
+    if (localVideoRef.current?.srcObject) {
+      const videoTracks = localVideoRef.current.srcObject.getVideoTracks();
+      if (videoTracks.length) {
+        const next = !videoTracks[0].enabled;
+        videoTracks[0].enabled = next;
+        setVideoOff(!next);
+      }
+    }
+  };
+ 
+    const toggleScreenShare = async () => {
+    try {
+      // This assumes your hook exposes a peer connection via getPeerConnection elsewhere.
+      // If not, wire this through your hook accordingly.
+      const pc = require("../../hooks/socket").getPeerConnection?.();
+      if (!pc) return showSnackbar("No peer connection");
+
+      if (!screenSharing) {
+        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        const screenTrack = stream.getVideoTracks()[0];
+        const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+        if (sender) await sender.replaceTrack(screenTrack);
+
+        screenTrack.onended = async () => {
+          const camStream = await navigator.mediaDevices.getUserMedia({ video: true });
+          const camTrack = camStream.getVideoTracks()[0];
+          if (sender) await sender.replaceTrack(camTrack);
+          setScreenSharing(false);
+          showSnackbar("Screen sharing stopped");
+        };
+
+        setScreenSharing(true);
+        showSnackbar("Screen sharing started");
+      } else {
+        const camStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        const camTrack = camStream.getVideoTracks()[0];
+        const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+        if (sender) await sender.replaceTrack(camTrack);
+        setScreenSharing(false);
+        showSnackbar("Screen sharing stopped");
+      }
+    } catch (e) {
+      console.error(e);
+      showSnackbar("Failed to toggle screen share");
+    }
+  };
+
+console.log("🎥 localVideo element:", localVideoRef.current);
+console.log("🎥 localVideo srcObject:", localVideoRef.current?.srcObject);
+console.log("📡 remoteVideo element:", remoteVideoRef.current);
+console.log("📡 remoteVideo srcObject:", remoteVideoRef.current?.srcObject);
+
 
   return (
     <>
@@ -359,8 +560,17 @@ const handleVideoCall = async () => {
         open={openVideoCallModal}
         onClose = {() => setOpenVideoCallModal(false)}
         callType="outgoing"
-        currentUserId={currentUserId}
-        otherUserId={otherUserId}
+        // currentUserId={currentUserId}
+        // otherUserId={otherUserId}
+        localVideoRef={localVideoRef}
+        remoteVideoRef={remoteVideoRef}
+        callTimer={callTimer}
+        callActive={inCall}
+        muted={muted}
+        cameraOff={videoOff}
+        toggleMute={toggleMute}
+        toggleCamera={toggleVideo}
+        endCall={endCall}
         />
       )}
     </>

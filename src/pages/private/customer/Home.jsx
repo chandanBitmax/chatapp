@@ -7,16 +7,26 @@ import {
   Button,
   IconButton,
   Box,
-  Typography,
+  Typography
 } from "@mui/material";
+import { Chat } from "@mui/icons-material";
+import SpeedDial from "@mui/material/SpeedDial";
 import { CallEnd, Close } from "@mui/icons-material";
+import { jwtDecode } from "jwt-decode";
+import ChatBot from "../customer/customerChat/ChatBot";
 import { getSocket } from "../../../hooks/socket";
 import useWebRTC from "../../../hooks/webRtc";
-
-export default function CustomerVideoCall() {
+import VideoCallModal from "../../../components/call/VideoCallModal";
+export default function CustomerVideoCall({ currentUserId }) {
   const [incomingCall, setIncomingCall] = useState(null);
   const [isCallActive, setIsCallActive] = useState(false);
+  const [muted, setMuted] = useState(false);  
+  const [videoOff, setVideoOff] = useState(false);
   const socket = getSocket();
+  const [showChat, setShowChat] = useState(false);
+  const token = localStorage.getItem("token");
+  const decoded = token ? jwtDecode(token) : null;
+  const customerUserId = decoded?.id;
 
   // ✅ include acceptCall from hook
   const {
@@ -113,11 +123,42 @@ export default function CustomerVideoCall() {
     setIsCallActive(false);
   };
 
+   const toggleVideo = () => {
+    if (localVideoRef.current?.srcObject) {
+      const videoTracks = localVideoRef.current.srcObject.getVideoTracks();
+      if (videoTracks.length) {
+        const next = !videoTracks[0].enabled;
+        videoTracks[0].enabled = next;
+        setVideoOff(!next);
+      }
+    }
+  };
+
+      const toggleMute = () => {
+      if (localVideoRef.current?.srcObject) {
+        const audioTracks = localVideoRef.current.srcObject.getAudioTracks();
+        if (audioTracks.length) {
+          const next = !audioTracks[0].enabled;
+          audioTracks[0].enabled = next;
+          setMuted(!next);
+        }
+      }
+    };
+
+    const cleanupCallUI = () => {
+    timerRef.current && clearInterval(timerRef.current);
+    setInCall(false);
+    setRoomId(null);
+    setCallTimer(0);
+    setMuted(false);
+    setVideoOff(false);
+    setScreenSharing(false);
+  };
+
 console.log("🎥 localVideo element:", localVideoRef.current);
 console.log("🎥 localVideo srcObject:", localVideoRef.current?.srcObject);
 console.log("📡 remoteVideo element:", remoteVideoRef.current);
 console.log("📡 remoteVideo srcObject:", remoteVideoRef.current?.srcObject);
-
 
   return (
     <>
@@ -142,7 +183,7 @@ console.log("📡 remoteVideo srcObject:", remoteVideoRef.current?.srcObject);
       )}
 
       {/* Active Call Window */}
-      {isCallActive && (
+      {/* {isCallActive && (
         <Dialog open fullWidth maxWidth="md" onClose={handleEndCall}>
           <DialogTitle>
             <Box display="flex" justifyContent="space-between" alignItems="center">
@@ -193,7 +234,54 @@ console.log("📡 remoteVideo srcObject:", remoteVideoRef.current?.srcObject);
             </Box>
           </DialogContent>
         </Dialog>
+      )} */}
+
+      {/* videocall modal */}
+            {isCallActive &&  (
+              <VideoCallModal
+              open={isCallActive}
+              onClose = {() => setIsCallActive(false)}
+              callType="outgoing"
+              // currentUserId={currentUserId}
+              // otherUserId={otherUserId}
+              localVideoRef={localVideoRef}
+              remoteVideoRef={remoteVideoRef}
+              // callTimer={callTimer}
+              // callActive={inCall}
+              // muted={muted}
+              cameraOff={videoOff}
+              toggleMute={toggleMute}
+              toggleCamera={toggleVideo}
+              endCall={endCall}
+              />
+            )}
+
+      <Box sx={{ height: "87.7vh", flexGrow: 1, position: "relative" }}>
+
+      {/* ChatBot Window */}
+      {showChat && (
+        <Box
+          sx={{
+            position: "absolute",
+            top: "50%",
+            left: "50%",
+            transform: "translate(-50%, -50%)", // center horizontally & vertically
+            zIndex: 999,
+          }}
+        >
+          <ChatBot />
+        </Box>
       )}
+
+
+            {/* Floating Chat Icon */}
+      <SpeedDial
+        ariaLabel="Chat"
+        sx={{ position: "absolute", bottom: 16, right: 16 }}
+        icon={<Chat />}
+        onClick={() => setShowChat((prev) => !prev)}
+      />
+    </Box>
     </>
   );
 }
