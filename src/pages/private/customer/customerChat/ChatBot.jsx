@@ -15,7 +15,7 @@ import { Forum, Email, Call, Send } from "@mui/icons-material";
 import { useGetConversationQuery, useSendMessageMutation } from "../../../../features/chat/chatApi";
 // import { getSockets } from "../../sockets/messageSocket";
 import { toast } from "react-toastify";
-import VideoCallModal from "../../../../components/common/VideoCallModal";
+// import VideoCallModal from "../../../../components/common/VideoCallModal";
 import MessageList from "../customerChat/messages/MessageList";
 import CallList from "../CallList";
 import ChatWindow from "./ChatWindow";
@@ -190,7 +190,7 @@ export default function ChatBot({ currentUserId }) {
             <BottomNavigationAction label="Calls" icon={<Call />} />
           </BottomNavigation>
 
-          {/* Call Modal */}
+          {/* Call Modal
           {openModal && (
             <VideoCallModal
               open={openModal}
@@ -199,7 +199,7 @@ export default function ChatBot({ currentUserId }) {
               // callerId={currentUserId}
               // receiverId={targetUserId}
             />
-          )}
+          )} */}
         </Paper>
       </Grid>
     </Grid>
