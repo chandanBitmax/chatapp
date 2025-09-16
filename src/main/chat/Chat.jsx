@@ -24,8 +24,9 @@ import Profile from "../../pages/private/profile/Profile";
 import StyledBadge from "../../components/common/StyledBadge";
 import useWebRTC from "../../hooks/webRtc";
 import { getSocket } from "../../hooks/socket";
+import AudioCallModal from "../../components/call/AudioCallModal";
 
-const IMG_BASE_URL = "https://livechatcrm-byj4.onrender.com/uploads/profile";
+const IMG_BASE_URL = "http://localhost:5003/uploads/profile";
 
 const Chat = ({ currentUserId }) => {
 
@@ -49,6 +50,7 @@ const Chat = ({ currentUserId }) => {
   const [isReply, setIsReply] = useState(false);
   const [currentDate, setCurrentDate] = useState("");
   const [openVideoCallModal, setOpenVideoCallModal] = useState(false);
+  const [openAudioCallModal, setOpenAudioCallModal] = useState(false);
 
   const timerRef = useRef(null);
   const socket = getSocket();
@@ -251,6 +253,23 @@ console.log(agentId);
     }
   };
 
+  const handleAudioCall = async () => {
+    try {
+      setIsCalling(true);
+      showSnackbar("Calling…");
+      setOpenAudioCallModal(true);
+    } catch (err) {
+      console.error("Start call error:", err);
+      showSnackbar("Failed to start call");
+      setIsCalling(false);
+    } finally {
+      setIsCalling(false);
+    }
+  };
+
+
+
+
     const handleStopCall = () => {
     // inform server (safe even if already ended)
     if (roomId) {
@@ -420,7 +439,7 @@ console.log("📡 remoteVideo srcObject:", remoteVideoRef.current?.srcObject);
                   </Stack>
                   <Box sx={{ display: 'flex', gap: 1 }}>
                     <IconButton size="small"
-                    // onClick={() => startCall(selectedUser._id)}
+                    onClick={() => handleAudioCall(true)}
                     >
                       <Call />
                     </IconButton>
@@ -554,6 +573,22 @@ console.log("📡 remoteVideo srcObject:", remoteVideoRef.current?.srcObject);
           <Profile />
         </Grid>
       </Grid>
+
+      {/* audio call modal */}
+      {openAudioCallModal && selectedUser && (
+        <AudioCallModal
+        open={openAudioCallModal}
+        onClose = {() => setOpenAudioCallModal(false)}
+        callType="outgoing"
+        // currentUserId={currentUserId}
+        // otherUserId={otherUserId}
+        username={selectedUser.name}
+        callTimer={callTimer}
+        muted={muted}
+        toggleMute={toggleMute}
+        endCall={endCall}
+        />
+      )}
       {/* videocall modal */}
       {openVideoCallModal && selectedUser && (
         <VideoCallModal

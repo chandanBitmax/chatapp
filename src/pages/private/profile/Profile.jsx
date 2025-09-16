@@ -5,7 +5,7 @@ import {
 
 import { useGetProfileQuery } from '../../../features/auth/authApi';
 import StyledBadge from '../../../components/common/StyledBadge';
-const IMG_BASE_URL = 'https://livechatcrm-byj4.onrender.com/uploads/profile';
+const IMG_BASE_URL = 'http://localhost:5003/uploads/profile';
 
 const Profile = () => {
   const { data, isLoading, isError } = useGetProfileQuery();

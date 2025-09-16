@@ -38,9 +38,9 @@ import { menuData } from "../common/menuData";
 import ProfileCard from "../../pages/private/customer/ProfileCard";
 import { useGetProfileQuery } from "../../features/auth/authApi";
 
-const socket = io("https://livechatcrm-byj4.onrender.com", { transports: ["websocket"] });
+const socket = io("http://localhost:5003", { transports: ["websocket"] });
 
-const IMG_BASE_URL = "https://livechatcrm-byj4.onrender.com/uploads/profile";
+const IMG_BASE_URL = "http://localhost:5003/uploads/profile";
 const drawerWidth = 200;
 
 const AppBar = styled(MuiAppBar)(({ theme }) => ({

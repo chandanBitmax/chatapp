@@ -133,7 +133,7 @@ const handleToggle = async () => {
               >
                 <Avatar
                   alt={agent?.first_name}
-                  src={`https://livechatcrm-byj4.onrender.com/uploads/profile/${agent?.profileImage}`}
+                  src={`http://localhost:5003/uploads/profile/${agent?.profileImage}`}
                   sx={{ height: "30px", width: "30px" }}
                 />
               </StyledBadge>

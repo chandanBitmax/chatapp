@@ -14,6 +14,7 @@ import {
 import { Forum, Email, Call, Send } from "@mui/icons-material";
 import { useGetConversationQuery, useSendMessageMutation } from "../../../../features/chat/chatApi";
 // import { getSockets } from "../../sockets/messageSocket";
+import { getSocket } from "../../../../hooks/socket";
 import { toast } from "react-toastify";
 // import VideoCallModal from "../../../../components/common/VideoCallModal";
 import MessageList from "../customerChat/messages/MessageList";
@@ -29,6 +30,8 @@ export default function ChatBot({ currentUserId }) {
 
   const { data: messagesData, isLoading: loadingMessages } = useGetConversationQuery();
   const [sendMessage] = useSendMessageMutation();
+
+  const socket = getSocket();
 
   // const handleTyping = (val) => {
   //   const { presenceSocket } = getSockets();
@@ -47,7 +50,7 @@ export default function ChatBot({ currentUserId }) {
       return;
     }
 
-    const { chatSocket } = getSockets();
+    // const { chatSocket } = getSockets();
     const roomId = [currentUserId, targetUserId].sort().join("_");
     const newMessage = {
       from: currentUserId,
@@ -57,8 +60,8 @@ export default function ChatBot({ currentUserId }) {
     };
 
     // Emit to socket
-    if (chatSocket) {
-      chatSocket.emit("sendMessage", { roomId:"123", message: newMessage });
+    if (socket) {
+      socket.emit("sendMessage", { message: newMessage });
     }
 
     // Optimistic UI
