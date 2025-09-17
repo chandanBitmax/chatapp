@@ -17,9 +17,11 @@ import ChatBot from "../customer/customerChat/ChatBot";
 import { getSocket } from "../../../hooks/socket";
 import useWebRTC from "../../../hooks/webRtc";
 import VideoCallModal from "../../../components/call/VideoCallModal";
+import AudioCallModal from "../../../components/call/AudioCallModal";
 export default function CustomerVideoCall({ currentUserId }) {
   const [incomingCall, setIncomingCall] = useState(null);
   const [isCallActive, setIsCallActive] = useState(false);
+  const [isAudioCall, setIsAudioCall] = useState(false);
   const [muted, setMuted] = useState(false);  
   const [videoOff, setVideoOff] = useState(false);
   const socket = getSocket();
@@ -74,7 +76,7 @@ export default function CustomerVideoCall({ currentUserId }) {
     if (!socket) return;
 
     const handleIncoming = (data) => {
-      setIncomingCall({ roomId: data.roomId, from: data.from });
+      setIncomingCall({ roomId: data.roomId, from: data.from, type: data.type});
     };
 
     const handleEnded = () => {
@@ -92,19 +94,24 @@ export default function CustomerVideoCall({ currentUserId }) {
   }, [socket]);
 
   // ✅ Accept call
-  const handleAccept =  () => {
+  const handleAccept = async  () => {
     if (!incomingCall) return;
 
-    console.log("✅ Accepting call", incomingCall.roomId);
-    socket.emit("call:accept", { roomId: incomingCall.roomId });
+    const { roomId, type } = incomingCall; // ✅ this line is correct
 
+    console.log("✅ Accepting call", roomId);
+    socket.emit("call:accept", { roomId });
+
+      if (type === "video") {
+    await acceptCall(incomingCall.offer); // 👈 pass the SDP offer from backend
+    console.log("✅ Video call accepted, starting WebRTC",incomingCall.offer)
     setIsCallActive(true);
-    // Wait for offer → then answer
-    // socket.once("webrtc:offer", async ({ sdp }) => {
-    //   console.log("📡 Received offer from agent");
-    //   await acceptCall(sdp); // ✅ correct function for callee
-    //   setIsCallActive(true);
-    // });
+  } else {
+    await acceptCall(incomingCall.offer); // audio is just video=false stream
+    console.log("✅ Audio call accepted, starting WebRTC",incomingCall.offer)
+    setIsAudioCall(true);
+  }
+  setIsCallActive(true);
   };
 
   const handleReject = () => {
@@ -155,17 +162,19 @@ export default function CustomerVideoCall({ currentUserId }) {
     setScreenSharing(false);
   };
 
-console.log("🎥 localVideo element:", localVideoRef.current);
-console.log("🎥 localVideo srcObject:", localVideoRef.current?.srcObject);
-console.log("📡 remoteVideo element:", remoteVideoRef.current);
-console.log("📡 remoteVideo srcObject:", remoteVideoRef.current?.srcObject);
+// console.log("🎥 localVideo element:", localVideoRef.current);
+// console.log("🎥 localVideo srcObject:", localVideoRef.current?.srcObject);
+// console.log("📡 remoteVideo element:", remoteVideoRef.current);
+// console.log("📡 remoteVideo srcObject:", remoteVideoRef.current?.srcObject);
+
+console.log("incomingCall:", incomingCall);
 
   return (
     <>
       {/* Incoming Call Dialog */}
       {incomingCall && !isCallActive && (
         <Dialog open onClose={handleReject}>
-          <DialogTitle>📞 Incoming Call</DialogTitle>
+          <DialogTitle>{incomingCall.type === "audio" ? "🔊 Incoming Audio Call" : "📹 Incoming Video Call"}</DialogTitle>
           <DialogContent>
             <Typography>
               Agent <strong>{incomingCall.from}</strong> is calling you...
@@ -182,66 +191,24 @@ console.log("📡 remoteVideo srcObject:", remoteVideoRef.current?.srcObject);
         </Dialog>
       )}
 
-      {/* Active Call Window */}
-      {/* {isCallActive && (
-        <Dialog open fullWidth maxWidth="md" onClose={handleEndCall}>
-          <DialogTitle>
-            <Box display="flex" justifyContent="space-between" alignItems="center">
-              <Typography variant="h6">Video Call</Typography>
-              <IconButton onClick={handleEndCall}>
-                <Close />
-              </IconButton>
-            </Box>
-          </DialogTitle>
-          <DialogContent>
-            <Box display="flex" gap={2} justifyContent="center" flexWrap="wrap">
-              <Box>
-                <Typography textAlign="center">You</Typography>
-                <video
-                  key={isCallActive ? "local-active" : "local-idle"}
-                  ref={localVideoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  width="300"
-                  height="225"
-                  style={{ borderRadius: "8px", objectFit: "cover" }}
-                />
-              </Box>
-              <Box>
-                <Typography textAlign="center">Agent</Typography>
-                <video
-                 key={isCallActive ? "remote-active" : "remote-idle"}
-                  ref={remoteVideoRef}
-                  autoPlay
-                  playsInline
-                  width="300"
-                  height="225"
-                  style={{ borderRadius: "8px", objectFit: "cover" }}
-                />
-              </Box>
-            </Box>
-
-            <Box mt={2} display="flex" justifyContent="center">
-              <Button
-                onClick={handleEndCall}
-                variant="contained"
-                color="error"
-                startIcon={<CallEnd />}
-              >
-                End Call
-              </Button>
-            </Box>
-          </DialogContent>
-        </Dialog>
-      )} */}
+      {/* Audiocall modal */}
+      {isAudioCall && incomingCall?.type === "audio" && (<AudioCallModal
+      open={isAudioCall}
+      onClose = {() => setIsAudioCall(false)}
+      callType="incomming"
+      endCall={handleEndCall}
+      username="Agent"
+      muted={muted}
+      toggleMute={toggleMute}
+       />)}
+      
 
       {/* videocall modal */}
-            {isCallActive &&  (
+            {isCallActive && incomingCall?.type === "video" &&  (
               <VideoCallModal
               open={isCallActive}
               onClose = {() => setIsCallActive(false)}
-              callType="outgoing"
+              callType="incomming"
               // currentUserId={currentUserId}
               // otherUserId={otherUserId}
               localVideoRef={localVideoRef}

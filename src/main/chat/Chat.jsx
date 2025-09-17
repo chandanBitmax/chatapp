@@ -60,14 +60,12 @@ const Chat = ({ currentUserId }) => {
   // const token = localStorage.getItem("token");
   // const decoded = token ? jwtDecode(token) : null;
   // const agentId = decoded?.id;
-console.log(agentId);
   // 🔗 API hooks
   const { data: callsData, isLoading: loadingCalls } = useGetCallHistoryQuery();
 
   const [createCall] = useCreateCallMutation();
-  console.log(createCall)
 
-   const { localVideoRef, remoteVideoRef, startCall: startWebRTC, endCall } =
+   const { localVideoRef, remoteVideoRef, startCall: startWebRTC, endCall, startAudioOnlyCall } =
       useWebRTC(roomId);
 
   const calls = callsData?.data || [];
@@ -221,6 +219,41 @@ console.log(agentId);
         // eslint-disable-next-line react-hooks/exhaustive-deps
       }, [socket, roomId, startWebRTC]);
 
+      // socket for audio call incomming
+          useEffect(() => {
+        if (!socket) return;
+    
+        const onAccepted = async () => {
+          // At this point the callee has joined the room. roomId is set, hook has re-rendered.
+          showSnackbar("Call accepted. Connecting…");
+         const res = await startAudioOnlyCall(); // creates offer, attaches local stream, etc.
+         console.log(res);
+          setInCall(true);
+        };
+    
+        const onRejected = () => {
+          showSnackbar("Call rejected");
+          cleanupCallUI();
+        };
+    
+        const onEnded = () => {
+          showSnackbar("Call ended by remote");
+          handleStopCall(); // ensures peer + streams closed
+        };
+    
+        socket.on("call:accepted", onAccepted);
+        socket.on("call:rejected", onRejected);
+        socket.on("call:ended", onEnded);
+    
+        return () => {
+          socket.off("call:accepted", onAccepted);
+          socket.off("call:rejected", onRejected);
+          socket.off("call:ended", onEnded);
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, [socket, roomId, startAudioOnlyCall]);
+
+
  const handleVideoCall = async () => {
     try {
       setIsCalling(true);
@@ -257,6 +290,22 @@ console.log(agentId);
     try {
       setIsCalling(true);
       showSnackbar("Calling…");
+
+      // 1) Create room on backend
+      const res = await createCall({ receiverId: customerId }).unwrap();
+      const backendRoomId = res?.data?.roomId;
+      console.log(res);
+      if (!backendRoomId) throw new Error("No roomId from backend");
+      setRoomId(backendRoomId);
+
+      // 2) Tell server to ring the customer
+      socket.emit("call:init", {
+        roomId: backendRoomId,
+        from: agentId,
+        receiverId: customerId,
+        type : "audio"
+      });
+
       setOpenAudioCallModal(true);
     } catch (err) {
       console.error("Start call error:", err);
@@ -266,9 +315,6 @@ console.log(agentId);
       setIsCalling(false);
     }
   };
-
-
-
 
     const handleStopCall = () => {
     // inform server (safe even if already ended)
@@ -351,10 +397,10 @@ console.log(agentId);
     }
   };
 
-console.log("🎥 localVideo element:", localVideoRef.current);
-console.log("🎥 localVideo srcObject:", localVideoRef.current?.srcObject);
-console.log("📡 remoteVideo element:", remoteVideoRef.current);
-console.log("📡 remoteVideo srcObject:", remoteVideoRef.current?.srcObject);
+// console.log("🎥 localVideo element:", localVideoRef.current);
+// console.log("🎥 localVideo srcObject:", localVideoRef.current?.srcObject);
+// console.log("📡 remoteVideo element:", remoteVideoRef.current);
+// console.log("📡 remoteVideo srcObject:", remoteVideoRef.current?.srcObject);
 
 
   return (

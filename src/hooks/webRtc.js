@@ -59,6 +59,66 @@ export default function useWebRTC(roomId) {
        console.log("📡 Remote track received", event.streams);
       setRemoteStream(stream);
       console.log("✅ Remote stream set in state:", remoteStream)
+    };
+
+    // send ICE candidates to signaling server
+    peer.onicecandidate = (event) => {
+      if (event.candidate && roomId) {
+        socket.emit("webrtc:ice-candidate", { roomId, candidate: event.candidate });
+      }
+    };
+
+    return peer;
+  };
+
+  const createAudioOnlyPeerConnection = async () => {
+    // grab mic only
+    const localStream = await navigator.mediaDevices.getUserMedia({
+      video: false,
+      audio: true,
+    });
+
+    localStreamRef.current = localStream;
+
+    tryAttachLocalStream();
+
+    // attach to local <video>
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = localStream;
+      console.log("✅ Attached localStream to localVideoRef", localStream);
+    }else{
+      console.error("❌ localVideoRef is null");
+    }
+
+    const peer = new RTCPeerConnection({
+      iceServers: [
+        // Free Google STUN
+    { urls: "stun:stun.l.google.com:19302" },
+
+    // Public TURN service (Metered.ca free relay)
+    // {
+    //   urls: [
+    //     "relay1.expressturn.com:3480",
+    //   ],
+    //   username: "000000002072935777",       // demo username
+    //   credential: "5tTjHAYIo7jVOnpxenAl2gIH02Q=",  // demo credential
+    // },
+    
+      ],
+    });
+    peerRef.current = peer;
+
+    // add local tracks
+    localStream.getTracks().forEach((track) =>
+      peer.addTrack(track, localStream)
+    );
+
+    // handle remote tracks
+    peer.ontrack = (event) => {
+      const [stream] = event.streams;
+       console.log("📡 Remote track received", event.streams);
+      setRemoteStream(stream);
+      console.log("✅ Remote stream set in state:", remoteStream)
 
       // if (remoteVideoRef.current) {
       //   remoteVideoRef.current.srcObject = stream;
@@ -75,7 +135,7 @@ export default function useWebRTC(roomId) {
     };
 
     return peer;
-  };
+  }
 
   /** Attach remote stream when ref becomes available */
   useEffect(() => {
@@ -93,7 +153,16 @@ export default function useWebRTC(roomId) {
 
     const offer = await peer.createOffer();
     await peer.setLocalDescription(offer);
-    socket.emit("webrtc:offer", { roomId, sdp: offer });
+    socket.emit("webrtc:offer", { roomId, sdp: offer,  type: "video"});
+  };
+
+  const startAudioOnlyCall = async () => {
+    await createAudioOnlyPeerConnection();
+    const peer = peerRef.current;
+    if (!peer) return console.error("❌ PeerConnection not initialized");
+    const offer = await peer.createOffer();
+    await peer.setLocalDescription(offer);
+    socket.emit("webrtc:offer", { roomId, sdp: offer, });
   };
 
   /** Callee: accept offer and send answer */
@@ -215,6 +284,7 @@ export default function useWebRTC(roomId) {
     remoteVideoRef,
     remoteStream,
     startCall,
+    startAudioOnlyCall,
     acceptCall,
     endCall,
   };

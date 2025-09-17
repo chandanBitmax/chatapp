@@ -46,7 +46,7 @@ export default function AudioCallModal({
           sx={{
             width: 300,
             height: 500,
-            bgcolor: "#075E54",
+            bgcolor: "#598177ff",
             borderRadius: 2,
             color: "#fff",
             display: "flex",
@@ -71,7 +71,7 @@ export default function AudioCallModal({
             sx={{
               width: 120,
               height: 120,
-              bgcolor: "#3e8e7e",
+              bgcolor: "#a3f1e1ff",
               fontSize: 50,
             }}
           >
