@@ -16,6 +16,7 @@ import { jwtDecode } from "jwt-decode";
 import ChatBot from "../customer/customerChat/ChatBot";
 import { getSocket } from "../../../hooks/socket";
 import useWebRTC from "../../../hooks/webRtc";
+import useWebRTCAudio from "../../../hooks/webRtcAudio";
 import VideoCallModal from "../../../components/call/VideoCallModal";
 import AudioCallModal from "../../../components/call/AudioCallModal";
 export default function CustomerVideoCall({ currentUserId }) {
@@ -36,7 +37,10 @@ export default function CustomerVideoCall({ currentUserId }) {
     remoteVideoRef,
     acceptCall, // ✅ use this when accepting
     endCall,
+    acceptAudioOnlyCall, // ✅ use this when accepting audio only
   } = useWebRTC(incomingCall?.roomId);
+
+  const {localAudioRef, remoteAudioRef, acceptAudioCall, endAudioCall } = useWebRTCAudio(incomingCall?.roomId);
 
   // Debug logger
   // useEffect(() => {
@@ -76,7 +80,7 @@ export default function CustomerVideoCall({ currentUserId }) {
     if (!socket) return;
 
     const handleIncoming = (data) => {
-      setIncomingCall({ roomId: data.roomId, from: data.from, type: data.type});
+      setIncomingCall({ roomId: data.roomId, from: data.from, type: data.type, offer: data.offer });
     };
 
     const handleEnded = () => {
@@ -97,22 +101,28 @@ export default function CustomerVideoCall({ currentUserId }) {
   const handleAccept = async  () => {
     if (!incomingCall) return;
 
-    const { roomId, type } = incomingCall; // ✅ this line is correct
+    const { roomId, type, offer } = incomingCall; // ✅ this line is correct
 
-    console.log("✅ Accepting call", roomId);
+    console.log("✅ Accepting call", roomId, "type:" , type);
     socket.emit("call:accept", { roomId });
 
-      if (type === "video") {
-    await acceptCall(incomingCall.offer); // 👈 pass the SDP offer from backend
-    console.log("✅ Video call accepted, starting WebRTC",incomingCall.offer)
-    setIsCallActive(true);
-  } else {
-    await acceptCall(incomingCall.offer); // audio is just video=false stream
-    console.log("✅ Audio call accepted, starting WebRTC",incomingCall.offer)
-    setIsAudioCall(true);
-  }
-  setIsCallActive(true);
+    console.log("📞 Received incoming call with offer:", offer);
+
+    await acceptCall(offer); // ✅ pass the offer
+
+        setIsCallActive(true);
   };
+
+  const handleAudioCall = async () => {
+    if (!incomingCall) return;
+    const { roomId, type, offer } = incomingCall; // ✅ this line is correct
+     console.log("✅ Accepting call", roomId, "type:" , type);
+    socket.emit("call:accept", { roomId });
+
+    console.log("📞 Received incoming call with offer:", offer);
+     await acceptAudioCall(offer); // ✅ pass the offer
+        setIsAudioCall(true);
+  }
 
   const handleReject = () => {
     if (incomingCall) {
@@ -168,6 +178,7 @@ export default function CustomerVideoCall({ currentUserId }) {
 // console.log("📡 remoteVideo srcObject:", remoteVideoRef.current?.srcObject);
 
 console.log("incomingCall:", incomingCall);
+console.log("isCallActive:", isAudioCall );
 
   return (
     <>
@@ -191,10 +202,31 @@ console.log("incomingCall:", incomingCall);
         </Dialog>
       )}
 
+      {incomingCall && !isAudioCall && (
+        <Dialog open onClose={handleReject}>
+          <DialogTitle>Incoming Audio Call</DialogTitle>
+          <DialogContent>
+            <Typography>
+              Agent <strong>{incomingCall.from}</strong> is calling you...
+            </Typography>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={handleReject} color="error" variant="outlined">
+              Reject
+            </Button>
+            <Button onClick={handleAudioCall} color="primary" variant="contained">
+              Accept
+            </Button>
+          </DialogActions>
+        </Dialog>
+      )}
+
       {/* Audiocall modal */}
-      {isAudioCall && incomingCall?.type === "audio" && (<AudioCallModal
+      {isAudioCall  && (<AudioCallModal
       open={isAudioCall}
       onClose = {() => setIsAudioCall(false)}
+      localAudioRef={localAudioRef}
+      remoteAudioRef={remoteAudioRef}
       callType="incomming"
       endCall={handleEndCall}
       username="Agent"
@@ -204,7 +236,7 @@ console.log("incomingCall:", incomingCall);
       
 
       {/* videocall modal */}
-            {isCallActive && incomingCall?.type === "video" &&  (
+            {isCallActive &&  (
               <VideoCallModal
               open={isCallActive}
               onClose = {() => setIsCallActive(false)}

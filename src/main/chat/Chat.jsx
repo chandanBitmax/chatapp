@@ -23,6 +23,7 @@ import { useGetAllCustomerQuery } from "../../features/auth/authApi";
 import Profile from "../../pages/private/profile/Profile";
 import StyledBadge from "../../components/common/StyledBadge";
 import useWebRTC from "../../hooks/webRtc";
+import useWebRTCAudio from "../../hooks/webRtcAudio";
 import { getSocket } from "../../hooks/socket";
 import AudioCallModal from "../../components/call/AudioCallModal";
 
@@ -43,6 +44,9 @@ const Chat = ({ currentUserId }) => {
   const [snackbarMsg, setSnackbarMsg] = useState("");
   const [openSnackbar, setOpenSnackbar] = useState(false);
 
+   const [liveMessages, setLiveMessages] = useState([]);
+  const [isTyping, setIsTyping] = useState(false); // ✅ typing state
+
   const [tab, setTab] = useState(0);
   const [selectedUser, setSelectedUser] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -54,7 +58,6 @@ const Chat = ({ currentUserId }) => {
 
   const timerRef = useRef(null);
   const socket = getSocket();
-
   const containerRef = useRef(null);
 
   // const token = localStorage.getItem("token");
@@ -65,14 +68,14 @@ const Chat = ({ currentUserId }) => {
 
   const [createCall] = useCreateCallMutation();
 
-   const { localVideoRef, remoteVideoRef, startCall: startWebRTC, endCall, startAudioOnlyCall } =
+   const { localVideoRef, remoteVideoRef, startCall: startWebRTC, endCall } =
       useWebRTC(roomId);
+    const {localAudioRef, remoteAudioRef, startAudioCall, endAudioCall} =  useWebRTCAudio(roomId);
 
   const calls = callsData?.data || [];
   const { data: customerData } = useGetAllCustomerQuery();
   const customers = customerData?.data || [];
   const [sendMessage] = useSendMessageMutation();
-  const [liveMessages, setLiveMessages] = useState([]);
 
   const { data: messagesData, isLoading: loadingMessages } = useGetConversationQuery(
     selectedUser?._id,
@@ -99,11 +102,17 @@ const Chat = ({ currentUserId }) => {
       to: otherUserId,
       message: text.trim(),
       createdAt: new Date().toISOString(),
+      _id: "temp-" + Date.now() // temp id for deduplication
     };
 
     // Optimistic update
     setLiveMessages((prev) => [...prev, newMessage]);
     setText("");
+
+    socket.emit("sendMessage", { ...newMessage });
+
+    // stop typing
+    socket.emit("stop-typing", { toUserId: otherUserId });
 
     try {
       await sendMessage({ to: otherUserId, message: newMessage.message }).unwrap();
@@ -119,23 +128,62 @@ const Chat = ({ currentUserId }) => {
     );
   }, [messagesData, liveMessages]);
 
-// const handleVideoCall = async () => {
-//   if(!selectedUser) return toast.error('Please select a user');
   
-//   try {
-//     const roomId = `video-call-${selectedUser?._id}-${agentId}`;
-//     console.log("roomId", roomId);
-//     await createCall ({ 
-//       roomId:"123",
-//       callerId: agentId,
-//       receiverId: selectedUser?._id
-//      }).unwrap();
-//     setOpenVideoCallModal(true);
-//   } catch (error) {
-//     console.log('fail to connect video call', error);
-//     toast.error('Failed to connect video call');
-//   }
-// };
+  // ✅ Socket listeners
+  useEffect(() => {
+    if (!socket) return;
+    if (!otherUserId) return;
+
+    // join personal room
+    socket.emit("userConnected", currentUserId);
+
+    const handleNewMessage = ({ senderId, message }) => {
+      if (
+        (senderId === currentUserId && message.to === otherUserId) ||
+        (senderId === otherUserId && message.to === currentUserId)
+      ) {
+        setLiveMessages((prev) => {
+           // 1. remove temp messages with same text & sender
+      const withoutTemp = prev.filter(
+        (m) =>
+          !m._id.startsWith("temp-") ||
+          !(m.message === message.message && m.from === message.from)
+      );
+
+          const alreadyExists = prev.some((m) => m._id === message._id);
+          if (alreadyExists) return prev;
+          return [...withoutTemp, message];
+        });
+      }
+    };
+
+    const handleTyping = ({ fromUserId, typing }) => {
+      if (fromUserId === otherUserId) {
+        setIsTyping(typing);
+      }
+    };
+
+    socket.on("newMessage", handleNewMessage);
+    socket.on("user-typing", handleTyping);
+
+    return () => {
+      socket.off("newMessage", handleNewMessage);
+      socket.off("user-typing", handleTyping);
+    };
+  }, [socket, currentUserId, otherUserId]);
+
+   // ✅ Typing events on input change
+  const handleChange = (e) => {
+    setText(e.target.value);
+    if (!otherUserId) return;
+
+    socket.emit("start-typing", { toUserId: otherUserId });
+    clearTimeout(socket.typingTimeout);
+    socket.typingTimeout = setTimeout(() => {
+      socket.emit("stop-typing", { toUserId: otherUserId });
+    }, 1500);
+  };
+
 
 
   // --- Detect date headers on scroll
@@ -219,14 +267,14 @@ const Chat = ({ currentUserId }) => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
       }, [socket, roomId, startWebRTC]);
 
-      // socket for audio call incomming
+  // socket for audio call incomming
           useEffect(() => {
         if (!socket) return;
     
         const onAccepted = async () => {
           // At this point the callee has joined the room. roomId is set, hook has re-rendered.
           showSnackbar("Call accepted. Connecting…");
-         const res = await startAudioOnlyCall(); // creates offer, attaches local stream, etc.
+         const res = await startAudioCall(); // creates offer, attaches local stream, etc.
          console.log(res);
           setInCall(true);
         };
@@ -251,7 +299,7 @@ const Chat = ({ currentUserId }) => {
           socket.off("call:ended", onEnded);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-      }, [socket, roomId, startAudioOnlyCall]);
+      }, [socket, roomId, ]);
 
 
  const handleVideoCall = async () => {
@@ -315,6 +363,25 @@ const Chat = ({ currentUserId }) => {
       setIsCalling(false);
     }
   };
+
+  useEffect(() => {
+  // Wait for modal to open and ref to be ready before starting the call
+  if (openAudioCallModal && roomId && !inCall) {
+    const timer = setTimeout(async () => {
+      try {
+        const res = await startAudioCall();
+        console.log("✅ Audio call started", res);
+        setInCall(true);
+      } catch (err) {
+        console.error("❌ Failed to start audio call", err);
+        showSnackbar("Failed to start audio call");
+      }
+    }, 100); // Wait ~100ms for modal & refs to mount
+
+    return () => clearTimeout(timer);
+  }
+}, [openAudioCallModal, roomId, inCall, startAudioCall, showSnackbar]);
+
 
     const handleStopCall = () => {
     // inform server (safe even if already ended)
@@ -397,17 +464,11 @@ const Chat = ({ currentUserId }) => {
     }
   };
 
-// console.log("🎥 localVideo element:", localVideoRef.current);
-// console.log("🎥 localVideo srcObject:", localVideoRef.current?.srcObject);
-// console.log("📡 remoteVideo element:", remoteVideoRef.current);
-// console.log("📡 remoteVideo srcObject:", remoteVideoRef.current?.srcObject);
-
-
   return (
     <>
       <Grid container spacing={1}>
         {/* Left Panel */}
-        <Grid size={{ xs: 12, lg: 3, sm: 6, md: 6 }}>
+        <Grid item xs={12} sm={6} md={6} lg={3}>
           <Card sx={{ p: 2 }}>
             <OutlinedInput
               startAdornment={<InputAdornment position="start"><Search /></InputAdornment>}
@@ -479,7 +540,7 @@ const Chat = ({ currentUserId }) => {
                     <Box>
                       <Typography variant="h6">{selectedUser.name}</Typography>
                       <Typography variant="body2" color="text.secondary">
-                        Last seen: {renderTime(selectedUser.createdAt)}
+                        {isTyping ? "typing..." : `Last seen: ${renderTime(selectedUser.createdAt)}`}
                       </Typography>
                     </Box>
                   </Stack>
@@ -596,7 +657,7 @@ const Chat = ({ currentUserId }) => {
                         fullWidth
                         size="small"
                         value={text}
-                        onChange={(e) => setText(e.target.value)}
+                        onChange={handleChange}
                         placeholder="Type your message"
                       />
                       <IconButton onClick={handleSend}>
@@ -626,6 +687,8 @@ const Chat = ({ currentUserId }) => {
         open={openAudioCallModal}
         onClose = {() => setOpenAudioCallModal(false)}
         callType="outgoing"
+        localAudioRef={localAudioRef}
+        remoteAudioRef={remoteAudioRef}
         // currentUserId={currentUserId}
         // otherUserId={otherUserId}
         username={selectedUser.name}
