@@ -1,84 +1,91 @@
 // src/hooks/useWebRTC.js
-
 import { useEffect, useRef, useState } from "react";
 import { getSocket } from "./socket";
 
-export default function useWebRTC(roomId, { audio , video  } = {}) {
+export default function useWebRTC(roomId, {audio, video}={}) {
   const [remoteStream, setRemoteStream] = useState(null);
-  const localMediaRef = useRef(null);   // <video> or <audio>
-  const remoteMediaRef = useRef(null);  // <video> or <audio>
-  const peerRef = useRef(null);
-  const localStreamRef = useRef(null);
+  const localVideoRef = useRef(null);   
+  const remoteVideoRef = useRef(null);  
+  const peerRef = useRef(null);    
+  const localStreamRef = useRef(null);  
+  
   const socket = getSocket();
+  
 
+  if (!audio && !video) {
+  throw new Error("At least one of audio or video must be requested in getUserMedia");
+}
 
   /** Create RTCPeerConnection and attach media */
-  const createPeerConnection = async () => {
+  const createPeerConnection = async (audio, video) => {
+     if (!audio && !video) {
+    throw new Error("❌ createPeerConnection: Must request at least audio or video");
+  }
+    // grab camera + mic
+    const localStream = await navigator.mediaDevices.getUserMedia({
+      video,
+      audio
+    });
 
-     console.log("createPeerConnection with:", { audio, video });
+   console.log("✅ Obtained local media stream", localStream);
+
+    localStreamRef.current = localStream;
+
+    tryAttachLocalStream();
+
+    // attach to local <video>
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = localStream;
+      console.log("✅ Attached localStream to localVideoRef", localStream);
+    }else{
+      console.error("❌ localVideoRef is null");
+    }
 
     const peer = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
-    
-    const localStream = await navigator.mediaDevices.getUserMedia({ audio, video });
-    localStreamRef.current = localStream;
+    peerRef.current = peer;
 
-    console.log("✅ Created local stream", localStream);
-
-    tryAttachLocalStream();
-
-    // attach to local media element
-    if (localMediaRef.current) {
-      localMediaRef.current.srcObject = localStream;
-      console.log("✅ Attached local stream", { audio, video });
-    }else{
-      console.error("❌ localMediaRef is null");
-    }
-
-    // const peer = new RTCPeerConnection({
-    //   iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-    // });
-    
     // add local tracks
-    localStream.getTracks().forEach((track) => peer.addTrack(track, localStream));
+    localStream.getTracks().forEach((track) =>
+      peer.addTrack(track, localStream)
+    );
 
     // handle remote tracks
     peer.ontrack = (event) => {
       const [stream] = event.streams;
-      console.log("📡 Remote track received", event.streams);
+       console.log("📡 Remote track received", event.streams);
       setRemoteStream(stream);
-            console.log("✅ Remote stream set in state:", remoteStream)
+      console.log("✅ Remote stream set in state:", remoteStream)
 
+      // if (remoteVideoRef.current) {
+      //   remoteVideoRef.current.srcObject = stream;
+      // }else {
+      //   console.warn("⚠️ remoteVideoRef is null when receiving track",remoteVideoRef);
+      // }
     };
 
-    // send ICE candidates
+    // send ICE candidates to signaling server
     peer.onicecandidate = (event) => {
       if (event.candidate && roomId) {
-        socket.emit("webrtc:ice-candidate", {
-          roomId,
-          candidate: event.candidate,
-        });
+        socket.emit("webrtc:ice-candidate", { roomId, candidate: event.candidate });
       }
     };
-  peerRef.current = peer;
+
     return peer;
   };
 
-  //  /** Attach remote stream when ref becomes available */
-  // useEffect(() => {
-  //   if (remoteStream && remoteVideoRef.current) {
-  //     remoteVideoRef.current.srcObject = remoteStream;
-  //     console.log("✅ Attached remoteStream to remoteVideoRef");
-  //   }
-  // }, [remoteStream, remoteVideoRef.current]);
+  /** Attach remote stream when ref becomes available */
+  useEffect(() => {
+    if (remoteStream && remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = remoteStream;
+      console.log("✅ Attached remoteStream to remoteVideoRef");
+    }
+  }, [remoteStream, remoteVideoRef.current]);
 
-  /** Caller: start a call (create offer) */
+  /** Caller: start a call, create offer */
   const startCall = async () => {
-
-   const res= await createPeerConnection(); 
-    console.log("createPeerConnection result:", res);
-
+    await createPeerConnection(audio, video);
     const peer = peerRef.current;
     if (!peer) return console.error("❌ PeerConnection not initialized");
 
@@ -87,54 +94,49 @@ export default function useWebRTC(roomId, { audio , video  } = {}) {
     socket.emit("webrtc:offer", { roomId, sdp: offer });
   };
 
-  /** Callee: accept call and send answer */
+  /** Callee: accept offer and send answer */
   const acceptCall = async (offer) => {
     if (!offer) {
       console.error("❌ acceptCall called with null offer");
       return;
     }
-    await createPeerConnection();
+    await createPeerConnection(audio, video);
     const peer = peerRef.current;
-    if (!peer) return console.error("❌ PeerConnection not initialized");
-     console.log("✅ acceptCall attaching local stream:", localStreamRef.current);
-
+     if (!peer) return console.error("❌ PeerConnection not initialized");
+    console.log("✅ acceptCall attaching local stream:", localStreamRef.current);
     await peer.setRemoteDescription(new RTCSessionDescription(offer));
     const answer = await peer.createAnswer();
     await peer.setLocalDescription(answer);
     socket.emit("webrtc:answer", { roomId, sdp: answer });
   };
 
- // replace tryAttachLocalStream
-const tryAttachLocalStream = () => {
-  const interval = setInterval(() => {
-    if (localMediaRef.current && localStreamRef.current) {
-      if (!localMediaRef.current.srcObject) {
-        localMediaRef.current.srcObject = localStreamRef.current;
-        console.log("✅ Attached local stream (retry)");
+  /** Attach local stream to video tag (with retry) */
+  const tryAttachLocalStream = () => {
+    const interval = setInterval(() => {
+      if (localVideoRef.current && localStreamRef.current) {
+        if (!localVideoRef.current.srcObject) {
+          localVideoRef.current.srcObject = localStreamRef.current;
+          console.log("✅ Attached local stream to local video element (retry)");
+        }
+        clearInterval(interval);
       }
-      clearInterval(interval);
-    }
-  }, 100);
+    }, 100);
 
-  setTimeout(() => clearInterval(interval), 5000);
-};
+    // Timeout after 5s
+    setTimeout(() => clearInterval(interval), 5000);
+  };
 
+  //   /** Attach remote stream if it changes */
+  // useEffect(() => {
+  //   if (remoteVideoRef.current && remoteStream) {
+  //     remoteVideoRef.current.srcObject = remoteStream;
+  //     console.log("✅ Remote stream attached to remoteVideoRef", remoteStream);
+  //   } else {
+  //     console.warn("⚠️ remoteVideoRef is null or remoteStream is not yet available");
+  //   }
+  // }, [remoteStream]);  // This will run whenever remoteStream is updated
 
-  useEffect(() => {
-  if (remoteStream && remoteMediaRef.current) {
-    remoteMediaRef.current.srcObject = remoteStream;
-
-    remoteMediaRef.current
-      .play()
-      .then(() => console.log("✅ Remote stream playing"))
-      .catch((err) => {
-        console.warn("⚠️ Autoplay blocked, waiting for user gesture", err);
-      });
-  }
-}, [remoteStream]);
-
-
-  /** Signaling listeners */
+  /** Listen for signaling */
   useEffect(() => {
     if (!socket) return;
 
@@ -146,7 +148,7 @@ const tryAttachLocalStream = () => {
     const handleAnswer = async ({ sdp }) => {
       const peer = peerRef.current;
       if (peer) {
-        await peer.setRemoteDescription(new RTCSessionDescription(sdp));
+        await peerRef.current.setRemoteDescription(new RTCSessionDescription(sdp));
       }
     };
 
@@ -158,7 +160,8 @@ const tryAttachLocalStream = () => {
       }
     };
 
-    socket.on("webrtc:offer", handleOffer);
+
+   socket.on("webrtc:offer", handleOffer);
     socket.on("webrtc:answer", handleAnswer);
     socket.on("webrtc:ice-candidate", handleCandidate);
 
@@ -169,7 +172,7 @@ const tryAttachLocalStream = () => {
     };
   }, [socket, roomId]);
 
-  /** Cleanup on unmount */
+    /** Cleanup when component unmounts */
   useEffect(() => {
     return () => {
       endCall();
@@ -177,22 +180,27 @@ const tryAttachLocalStream = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /** End call and cleanup */
+
+/** End call and cleanup */
   const endCall = () => {
     if (peerRef.current) {
       peerRef.current.close();
       peerRef.current = null;
     }
+
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((t) => t.stop());
       localStreamRef.current = null;
     }
-    if (localMediaRef.current) {
-      localMediaRef.current.srcObject = null;
+
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = null;
     }
-    if (remoteMediaRef.current) {
-      remoteMediaRef.current.srcObject = null;
+
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = null;
     }
+
     setRemoteStream(new MediaStream());
 
     if (roomId) {
@@ -201,12 +209,11 @@ const tryAttachLocalStream = () => {
   };
 
   return {
-    localMediaRef,
-    remoteMediaRef,
+    localVideoRef,
+    remoteVideoRef,
     remoteStream,
     startCall,
     acceptCall,
     endCall,
-    peerRef, // useful for screen sharing / track replacement
   };
 }

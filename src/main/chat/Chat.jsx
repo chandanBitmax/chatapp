@@ -2,10 +2,10 @@ import { useRef, useState, useMemo, useEffect } from "react";
 import {
   Box, Tabs, Tab, List, ListItem, ListItemText, Card,
   Grid, Avatar, OutlinedInput, InputAdornment, Typography,
-  Stack, IconButton, TextField, CircularProgress
+  Stack, IconButton, TextField, CircularProgress,Button, Snackbar,
 } from "@mui/material";
 import {
-  Search, Send, Videocam, Call, CallEnd, Mic, MicOff, VideocamOff,
+  Search, Send, Videocam, Call, CallEnd, Mic, MicOff, VideocamOff,StopScreenShare,ScreenShare,
 } from "@mui/icons-material";
 import { useGetConversationQuery, useSendMessageMutation } from "../../features/chat/chatApi";
 import { toast } from "react-toastify";
@@ -23,6 +23,8 @@ import StyledBadge from "../../components/common/StyledBadge";
 import useWebRTC from "../../hooks/webRtc";
 import { getSocket } from "../../hooks/socket";
 import CallModal from "../../components/call/CallModal";
+import VideoCallModal from "../../components/call/VideoCallModal"
+import AudioCallModal from "../../components/call/AudioCallModal"
 
 const IMG_BASE_URL = "http://localhost:5003/uploads/profile";
 
@@ -31,6 +33,7 @@ const Chat = ({ currentUserId }) => {
   const customerId = "68aa9e4a4e61ea8cf8705a21";
 
   const [inCall, setInCall] = useState(false);
+  const [inAudioCall, setInAudioCall] = useState(false);
   const [isCalling, setIsCalling] = useState(false);
   const [roomId, setRoomId] = useState(null);
   const [muted, setMuted] = useState(false);
@@ -43,6 +46,11 @@ const Chat = ({ currentUserId }) => {
   const [liveMessages, setLiveMessages] = useState([]);
   const [isTyping, setIsTyping] = useState(false);
   const [currentDate, setCurrentDate] = useState("");
+  const [snackbarMsg, setSnackbarMsg] = useState("");
+  const [openSnackbar, setOpenSnackbar] = useState(false);
+  const [screenSharing, setScreenSharing] = useState(false);
+
+
 
   const [openVideoCallModal, setOpenVideoCallModal] = useState(false);
   const [openAudioCallModal, setOpenAudioCallModal] = useState(false);
@@ -67,15 +75,15 @@ const Chat = ({ currentUserId }) => {
   
   // WebRTC hooks
   const {
-    localMediaRef: localVideoRef,
-    remoteMediaRef: remoteVideoRef,
+    localVideoRef: localVideoRef,
+    remoteVideoRef: remoteVideoRef,
     startCall: startVideoCall,
     endCall: endVideoCall,
   } = useWebRTC(roomId, { audio: true, video: true });
 
   const {
-    localMediaRef: localAudioRef,
-    remoteMediaRef: remoteAudioRef,
+    localVideoRef: localAudioRef,
+    remoteVideoRef: remoteAudioRef,
     startCall: startAudioCall,
     endCall: endAudioCall,
   } = useWebRTC(roomId, { audio: true, video: false });
@@ -111,28 +119,125 @@ const Chat = ({ currentUserId }) => {
     );
   }, [messagesData, liveMessages]);
 
+  const showSnackbar = (msg) => {
+    setSnackbarMsg(msg);
+    setOpenSnackbar(true);
+  };
+
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, "0")}:${secs
+      .toString()
+      .padStart(2, "0")}`;
+  };
+
+  useEffect(() => {
+    if (!inCall) return;
+    timerRef.current && clearInterval(timerRef.current);
+    setCallTimer(0);
+    timerRef.current = setInterval(() => {
+      setCallTimer((p) => p + 1);
+    }, 1000);
+    return () => {ScreenShare
+      timerRef.current && clearInterval(timerRef.current);
+    };
+  }, [inCall]);
+
+   useEffect(() => {
+    if (!socket) return;
+
+    const onAccepted = async () => {
+      // At this point the callee has joined the room. roomId is set, hook has re-rendered.
+      showSnackbar("Call accepted. Connecting…");
+      await startVideoCall(); // creates offer, attaches local stream, etc.
+      setInCall(true);
+    };
+
+    const onRejected = () => {
+      showSnackbar("Call rejected");
+      cleanupCallUI();
+    };
+
+    const onEnded = () => {
+      showSnackbar("Call ended by remote");
+      handleStopCall(); // ensures peer + streams closed
+    };
+
+    socket.on("call:accepted", onAccepted);
+    socket.on("call:rejected", onRejected);
+    socket.on("call:ended", onEnded);
+
+    return () => {
+      socket.off("call:accepted", onAccepted);
+      socket.off("call:rejected", onRejected);
+      socket.off("call:ended", onEnded);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socket, roomId, startVideoCall]);
+
+  {/* Audio call */}
+    useEffect(() => {
+    if (!socket) return;
+
+    const onAccepted = async () => {
+      // At this point the callee has joined the room. roomId is set, hook has re-rendered.
+      showSnackbar("Call accepted. Connecting…");
+      await startAudioCall(); // creates offer, attaches local stream, etc.
+      setInAudioCall(true);
+    };
+
+    const onRejected = () => {
+      showSnackbar("Call rejected");
+      cleanupCallUI();
+    };
+
+    const onEnded = () => {
+      showSnackbar("Call ended by remote");
+      handleStopCall(); // ensures peer + streams closed
+    };
+
+    socket.on("call:accepted", onAccepted);
+    socket.on("call:rejected", onRejected);
+    socket.on("call:ended", onEnded);
+
+    return () => {
+      socket.off("call:accepted", onAccepted);
+      socket.off("call:rejected", onRejected);
+      socket.off("call:ended", onEnded);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socket, roomId, startAudioCall]);
+
   // Call flow
   const handleVideoCall = async () => {
-    setIsCalling(true);
+    
     try {
+      setIsCalling(true);
+     showSnackbar("Calling…");
+
       const res = await createCall({ receiverId: customerId }).unwrap();
       const backendRoomId = res?.data?.roomId;
       console.log("backendRoomId", backendRoomId);
       setRoomId(backendRoomId);
+      // await startVideoCall();
       socket.emit("call:init", { roomId: backendRoomId, from: agentId, receiverId: customerId, callType: "video" });
-      await startVideoCall();
       setOpenVideoCallModal(true);
+      //  setInCall(true); // set state early so UI renders
       
     } catch (err) {
       toast.error("Failed to start call");
+      showSnackbar("Failed to start call");
+      setIsCalling(false);
     } finally {
       setIsCalling(false);
     }
   };
 
   const handleAudioCall = async () => {
-    setIsCalling(true);
     try {
+      setIsCalling(true);
+     showSnackbar("Calling…");
       const res = await createCall({ receiverId: customerId }).unwrap();
       const backendRoomId = res?.data?.roomId;
       setRoomId(backendRoomId);
@@ -142,6 +247,8 @@ const Chat = ({ currentUserId }) => {
       
     } catch (err) {
       toast.error("Failed to start call");
+      showSnackbar("Failed to start call");
+      setIsCalling(false);
     } finally {
       setIsCalling(false);
     }
@@ -164,31 +271,33 @@ const Chat = ({ currentUserId }) => {
   };
 
   // Socket listeners for call flow
-  useEffect(() => {
-    if (!socket) return;
-    const onAccepted = async ({ callType }) => {
-      if (callType === "video") await startVideoCall();
-      if (callType === "audio") await startAudioCall();
-      setInCall(true);
-    };
-    const onRejected = () => {
-      toast.info("Call rejected");
-      cleanupCallUI();
-    };
-    const onEnded = () => {
-      toast.info("Call ended");
-      handleStopCall();
-    };
-    socket.on("call:accepted", onAccepted);
-    socket.on("call:rejected", onRejected);
-    socket.on("call:ended", onEnded);
-    return () => {
-      socket.off("call:accepted", onAccepted);
-      socket.off("call:rejected", onRejected);
-      socket.off("call:ended", onEnded);
-    };
-  }, [socket, roomId, startVideoCall, startAudioCall]);
+  // useEffect(() => {
+  //   if (!socket) return;
+  //   const onAccepted = async ({ callType }) => {
+  //     if (callType === "video") await startVideoCall();
+  //     if (callType === "audio") await startAudioCall();
+  //     setInCall(true);
+  //   };
+  //   const onRejected = () => {
+  //     toast.info("Call rejected");
+  //     cleanupCallUI();
+  //   };
+  //   const onEnded = () => {
+  //     toast.info("Call ended");
+  //     handleStopCall();
+  //   };
+  //   socket.on("call:accepted", onAccepted);
+  //   socket.on("call:rejected", onRejected);
+  //   socket.on("call:ended", onEnded);
+  //   return () => {
+  //     socket.off("call:accepted", onAccepted);
+  //     socket.off("call:rejected", onRejected);
+  //     socket.off("call:ended", onEnded);
+  //   };
+  // }, [socket, roomId, startVideoCall, startAudioCall]);
 
+    // Socket lifecycle listeners relevant to caller
+ 
   // Timer
   useEffect(() => {
     if (inCall) {
@@ -208,13 +317,14 @@ const Chat = ({ currentUserId }) => {
       setMuted(!track.enabled);
     }
   };
-  const toggleVideo = () => {
-    const stream = localVideoRef.current?.srcObject;
-    if (!stream) return;
-    const track = stream.getVideoTracks()[0];
-    if (track) {
-      track.enabled = !track.enabled;
-      setVideoOff(!track.enabled);
+ const toggleVideo = () => {
+    if (localVideoRef.current?.srcObject) {
+      const videoTracks = localVideoRef.current.srcObject.getVideoTracks();
+      if (videoTracks.length) {
+        const next = !videoTracks[0].enabled;
+        videoTracks[0].enabled = next;
+        setVideoOff(!next);
+      }
     }
   };
 
@@ -246,6 +356,51 @@ const Chat = ({ currentUserId }) => {
           user?.email?.toLowerCase().includes(searchQuery.toLowerCase()))
     );
   }, [customers, tab, searchQuery]);
+
+   const toggleScreenShare = async () => {
+    try {
+      // This assumes your hook exposes a peer connection via getPeerConnection elsewhere.
+      // If not, wire this through your hook accordingly.
+      const pc = require("../../hooks/socket").getPeerConnection?.();
+      if (!pc) return showSnackbar("No peer connection");
+
+      if (!screenSharing) {
+        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        const screenTrack = stream.getVideoTracks()[0];
+        const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+        if (sender) await sender.replaceTrack(screenTrack);
+
+        screenTrack.onended = async () => {
+          const camStream = await navigator.mediaDevices.getUserMedia({ video: true });
+          const camTrack = camStream.getVideoTracks()[0];
+          if (sender) await sender.replaceTrack(camTrack);
+          setScreenSharing(false);
+          showSnackbar("Screen sharing stopped");
+        };
+
+        setScreenSharing(true);
+        showSnackbar("Screen sharing started");
+      } else {
+        const camStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        const camTrack = camStream.getVideoTracks()[0];
+        const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+        if (sender) await sender.replaceTrack(camTrack);
+        setScreenSharing(false);
+        showSnackbar("Screen sharing stopped");
+      }
+    } catch (e) {
+      console.error(e);
+      showSnackbar("Failed to toggle screen share");
+    }
+  };
+
+  // console.log("remotevideoRef", remoteVideoRef)
+  // console.log("remoteAudioRef", remoteAudioRef)
+  // console.log("localVideoRef", localVideoRef)
+  // console.log("localAudioRef", localAudioRef)
+
+  // console.log("inCall", inCall)
+  // console.log("isCalling", isCalling)
 
   return (
     <>
@@ -390,37 +545,28 @@ const Chat = ({ currentUserId }) => {
       </Grid>
 
       {/* Audio Call Modal */}
-      <CallModal
+      {inAudioCall && <AudioCallModal
         open={openAudioCallModal}
-        onClose={() => setOpenAudioCallModal(false)}
-        callType="audio"
-        username={selectedUser?.name}
-        isRinging={!inCall}
-        ringingType="outgoing"
-        localRef={localAudioRef}
-        remoteRef={remoteAudioRef}
-        callTimer={callTimer}
-        muted={muted}
-        toggleMute={toggleMute}
-        endCall={handleStopCall}
-      />
+        localAudioRef={localAudioRef}
+        remoteAudioRef={remoteAudioRef}
+        />
+      }
+    {/* Video Call Modal */}
+    {inCall && <VideoCallModal
+       open={openVideoCallModal}
+      localVideoRef={localVideoRef}
+      remoteVideoRef={remoteVideoRef}       
+     />
+    }
 
-      {/* Video Call Modal */}
-      <CallModal
-        open={openVideoCallModal}
-        onClose={() => setOpenVideoCallModal(false)}
-        callType="video"
-        username={selectedUser?.name}
-        isRinging={!inCall}
-        ringingType="outgoing"
-        localRef={localVideoRef}
-        remoteRef={remoteVideoRef}
-        callTimer={callTimer}
-        muted={muted}
-        cameraOff={videoOff}
-        toggleMute={toggleMute}
-        toggleCamera={toggleVideo}
-        endCall={handleStopCall}
+
+
+
+      <Snackbar
+        open={openSnackbar}
+        autoHideDuration={3000}
+        onClose={() => setOpenSnackbar(false)}
+        message={snackbarMsg}
       />
     </>
   );

@@ -23,6 +23,7 @@ export default function VideoCallModal({
   };
 
   if (!open) return null;
+  // console.log("remoteVideoRef", remoteVideoRef)
 
   return (
     <Modal open={open} onClose={onClose}>
