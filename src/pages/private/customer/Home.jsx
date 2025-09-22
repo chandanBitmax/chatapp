@@ -1,306 +1,224 @@
-import React, { useState, useEffect, useRef } from "react";
-import { Box } from "@mui/material";
-import { Chat } from "@mui/icons-material";
-import SpeedDial from "@mui/material/SpeedDial";
-import { jwtDecode } from "jwt-decode";
-
-import ChatBot from "../customer/customerChat/ChatBot";
+import React, { useState, useEffect } from "react";
+import {
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Button,
+  IconButton,
+  Box,
+  Typography,
+} from "@mui/material";
+import { CallEnd, Close } from "@mui/icons-material";
 import { getSocket } from "../../../hooks/socket";
 import useWebRTC from "../../../hooks/webRtc";
-import CallModal from "../../../components/call/CallModal";
+import VideoCallModal from "../../../components/call/VideoCallModal";
+import AudioCallModal from "../../../components/call/AudioCallModal";
 
-export default function CustomerVideoCall({ currentUserId }) {
-  const [incomingCall, setIncomingCall] = useState(null); // { roomId, from, type }
-  const [incomingOffer, setIncomingOffer] = useState(null); // store remote offer SDP until user accepts
+export default function CustomerVideoCall() {
+  const [incomingCall, setIncomingCall] = useState(null);
+  const [AudioCallIncoming, setAudioCallIncoming] = useState(false); 
   const [isCallActive, setIsCallActive] = useState(false);
-  const [activeCallType, setActiveCallType] = useState(null); // "audio" | "video"
-  const [muted, setMuted] = useState(false);
-  const [videoOff, setVideoOff] = useState(false);
-  const [showChat, setShowChat] = useState(false);
-  const [callTimer, setCallTimer] = useState(0);
-
-  const timerRef = useRef(null);
+  const [isAudioCallActive, setIsAudioCallActive] = useState(false);
   const socket = getSocket();
 
-  const token = localStorage.getItem("token");
-  const decoded = token ? jwtDecode(token) : null;
-  const customerUserId = decoded?.id;
-
-  // Video WebRTC
+  // ✅ include acceptCall from hook
   const {
-    localMediaRef: localVideoRef,
-    remoteMediaRef: remoteVideoRef,
-    acceptCall: acceptVideoCall,
-    endCall: endVideoCall,
-  } = useWebRTC(incomingCall?.roomId, { audio: true, video: true });
+    localVideoRef,
+    remoteVideoRef,
+    acceptCall, // ✅ use this when accepting
+    endCall,
+  } = useWebRTC(incomingCall?.roomId, {audio: true, video: true});
 
+  const{
+    localVideoRef: audioLocalVideoRef,
+    remoteVideoRef: audioRemoteVideoRef,
+    acceptCall: audioAcceptCall, // ✅ use this when accepting
+    endCall: audioEndCall,
+  }= useWebRTC(incomingCall?.roomId, {audio: true, video: false});
 
+  // Debug logger
+  // useEffect(() => {
+  //   if (!socket) return;
+  //   const logAllEvents = (event, ...args) => {
+  //     console.log("📡 Incoming Event:", event, args);
+  //   };
+  //   [
+  //     "call:incoming",
+  //     "call:accepted",
+  //     "call:rejected",
+  //     "call:ended",
+  //     "webrtc:offer",
+  //     "webrtc:answer",
+  //     "webrtc:ice-candidate",
+  //     "call:error",
+  //   ].forEach((event) => {
+  //     socket.on(event, (...args) => logAllEvents(event, ...args));
+  //   });
+  //   return () => {
+  //     [
+  //       "call:incoming",
+  //       "call:accepted",
+  //       "call:rejected",
+  //       "call:ended",
+  //       "webrtc:offer",
+  //       "webrtc:answer",
+  //       "webrtc:ice-candidate",
+  //       "call:error",
+  //     ].forEach((event) => socket.off(event));
+  //   };
+  // }, [socket]);
 
-  // Audio WebRTC
-  const {
-    localMediaRef: localAudioRef,
-    remoteMediaRef: remoteAudioRef,
-    acceptCall: acceptAudioCall,
-    endCall: endAudioCall,
-  } = useWebRTC(incomingCall?.roomId, { audio: true, video: false });
-
-  /** -------------------------
-   *  SOCKET LISTENERS
-   * ------------------------- */
+  // Listen for incoming calls
+  
   useEffect(() => {
     if (!socket) return;
+    console.log("socket", socket);
 
     const handleIncoming = (data) => {
-      // Example: { roomId, from, type: "audio"|"video" }
       console.log("incoming call", data);
-      setIncomingCall({
-        roomId: data.roomId,
-        from: data.from,
-        callType: data?.callType ,
-      });
-      setIncomingOffer(null);
+      // if(data.callType === "video") {
+        setIncomingCall({ roomId: data.roomId, from: data.from, receiverId: data.receiverId, callType: data.callType });
+      // }else if(data.callType === "audio") {
+      //   setAudioCallIncoming({ roomId: data.roomId, from: data.from, receiverId: data.receiverId, callType: data.callType });
+      //   console.log("AudioCallIncoming", AudioCallIncoming, data);
+      // }
     };
 
     const handleEnded = () => {
-      handleStopCall();
-    };
-
-      // When caller creates offer, it will be relayed as "webrtc:offer"
-    const handleWebrtcOffer = ({ sdp, from, roomId }) => {
-      console.log("Received webrtc:offer", { from, roomId, hasSdp: !!sdp });
-      // Only accept/store the offer if it matches the incoming call's room
-      if (incomingCall && roomId && incomingCall.roomId === roomId) {
-        setIncomingOffer(sdp);
-      } else if (!incomingCall && roomId) {
-        // If we didn't yet receive call:incoming (rare), still store offer and set minimal incomingCall
-        setIncomingCall({ roomId, from, callType: incomingCall?.callType || "video" });
-        setIncomingOffer(sdp);
-      } else {
-        // store anyway (helps resilience)
-        setIncomingOffer(sdp);
-      }
+      setIncomingCall(null);
+      setIsCallActive(false);
     };
 
     socket.on("call:incoming", handleIncoming);
     socket.on("call:ended", handleEnded);
-    socket.on("webrtc:offer", handleWebrtcOffer);
 
     return () => {
       socket.off("call:incoming", handleIncoming);
       socket.off("call:ended", handleEnded);
-      socket.off("webrtc:offer", handleWebrtcOffer);
     };
-  }, [socket, incomingCall]);
+  }, [socket]);
 
-  /** -------------------------
-   *  TIMER HANDLING
-   * ------------------------- */
-  useEffect(() => {
-    if (isCallActive) {
-      setCallTimer(0);
-      timerRef.current && clearInterval(timerRef.current);
-      timerRef.current = setInterval(() => {
-        setCallTimer((t) => t + 1);
-      }, 1000);
-    } else {
-      timerRef.current && clearInterval(timerRef.current);
-      timerRef.current = null;
-      setCallTimer(0);
-    }
-    return () => timerRef.current && clearInterval(timerRef.current);
-  }, [isCallActive]);
-
-  /** -------------------------
-   *  ACCEPT / REJECT / END
-   * ------------------------- */
-  const handleAcceptVideo = async() => {
-    console.log("handleAcceptVideo", { incomingCall });
+  // ✅ Accept call
+  const handleAccept =  () => {
     if (!incomingCall) return;
+
+    console.log("✅ Accepting call", incomingCall.roomId);
     socket.emit("call:accept", { roomId: incomingCall.roomId });
+
     setIsCallActive(true);
-    setActiveCallType("video");
-
-     try {
-      if (incomingOffer) {
-        await acceptVideoCall(incomingOffer);
-        // clear stored offer after consuming it
-        setIncomingOffer(null);
-      } else {
-        // If the offer hasn't arrived yet, we rely on the useWebRTC internal listener
-        // (if your hook emits acceptCall on offer reception automatically).
-        console.warn("No incomingOffer stored — waiting for webrtc:offer to arrive.");
-      }
-    } catch (err) {
-      console.error("Failed to accept video call:", err);
-    }
-
+    // Wait for offer → then answer
+    // socket.once("webrtc:offer", async ({ sdp }) => {
+    //   console.log("📡 Received offer from agent");
+    //   await acceptCall(sdp); // ✅ correct function for callee
+    //   setIsCallActive(true);
+    // });
   };
 
-  const handleAcceptAudio = async() => {
-    console.log("handleAcceptAudio", { incomingCall });
-    if (!incomingCall) return;
-    socket.emit("call:accept", { roomId: incomingCall.roomId });
-    setIsCallActive(true);
-    setActiveCallType("audio");
+  const handleAcceptAudio = () => {
+    if (!AudioCallIncoming) return;
 
-    try {
-      if (incomingOffer) {
-        await acceptAudioCall(incomingOffer);
-        setIncomingOffer(null);
-      } else {
-        console.warn("No incomingOffer stored — waiting for webrtc:offer to arrive.");
-      }
-    } catch (err) {
-      console.error("Failed to accept audio call:", err);
+    console.log("✅ Accepting call", AudioCallIncoming.roomId);
+    socket.emit("call:accept", { roomId: AudioCallIncoming.roomId });
+
+    setIsAudioCallActive(true);
+    
     }
-  };
+
+
 
   const handleReject = () => {
-    if (!incomingCall) return;
-    socket.emit("call:reject", { roomId: incomingCall.roomId });
-    setIncomingCall(null);
-    setIncomingOffer(null);
+    if (incomingCall) {
+      socket.emit("call:reject", { roomId: incomingCall.roomId });
+      setIncomingCall(null);
+    }
   };
 
-  const handleStopCall = () => {
-    try {
-      endVideoCall?.();
-    } catch {}
-    try {
-      endAudioCall?.();
-    } catch {}
-
-    if (incomingCall?.roomId) {
+  const handleEndCall = () => {
+    endCall();
+    if (incomingCall) {
       socket.emit("call:end", { roomId: incomingCall.roomId });
     }
-
     setIncomingCall(null);
-    setIncomingOffer(null);
     setIsCallActive(false);
-    setActiveCallType(null);
-    setMuted(false);
-    setVideoOff(false);
-
-    timerRef.current && clearInterval(timerRef.current);
-    timerRef.current = null;
-    setCallTimer(0);
   };
 
-  /** -------------------------
-   *  TOGGLES
-   * ------------------------- */
-  const toggleVideo = () => {
-    const vidStream =
-      localVideoRef?.current?.srcObject || localAudioRef?.current?.srcObject;
-    if (!vidStream) return;
-    const videoTracks = vidStream.getVideoTracks();
-    if (!videoTracks.length) return;
-    const next = !videoTracks[0].enabled;
-    videoTracks[0].enabled = next;
-    setVideoOff(!next);
-  };
+console.log("🎥 localVideo element:", localVideoRef.current);
+console.log("🎥 localVideo srcObject:", localVideoRef.current?.srcObject);
+console.log("📡 remoteVideo element:", remoteVideoRef.current);
+console.log("📡 remoteVideo srcObject:", remoteVideoRef.current?.srcObject);
 
-  const toggleMute = () => {
-    const localStream =
-      localVideoRef?.current?.srcObject || localAudioRef?.current?.srcObject;
-    if (!localStream) return;
-    const audioTracks = localStream.getAudioTracks();
-    if (!audioTracks.length) return;
-    const next = !audioTracks[0].enabled;
-    audioTracks[0].enabled = next;
-    setMuted(!next);
-  };
-
-  /** -------------------------
-   *  CLEANUP
-   * ------------------------- */
-  useEffect(() => {
-    return () => {
-      try {
-        endVideoCall?.();
-      } catch {}
-      try {
-        endAudioCall?.();
-      } catch {}
-      timerRef.current && clearInterval(timerRef.current);
-    };
-  }, []);
-
-  /** -------------------------
-   *  RENDER
-   * ------------------------- */
-
-  // console.log("Rendering CustomerVideoCall", {
-  //   incomingCall,
-  //   isCallActive,
-  //   activeCallType,
-  //   muted,
-  //   videoOff,
-  //   callTimer,
-  //   localAudioRef,
-  //   remoteAudioRef,
-  //   localVideoRef,
-  //   remoteVideoRef,
-  // });
 
   return (
     <>
-      {/* Incoming Call Modal */}
+      {/* Incoming Call Dialog */}
       {incomingCall && !isCallActive && (
-        <CallModal
-          open
-          callType={incomingCall.callType}
-          username={incomingCall.from || "Unknown"}
-          isRinging
-          ringingType="incoming"
-          onAccept={
-            incomingCall.callType === "audio" ? handleAcceptAudio : handleAcceptVideo
-          }
-          onReject={handleReject}
-        />
+        <Dialog open onClose={handleReject}>
+          <DialogTitle>📞 Incoming Call</DialogTitle>
+          <DialogContent>
+            <Typography>
+              Agent <strong>{incomingCall.from}</strong> is calling you...
+            </Typography>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={handleReject} color="error" variant="outlined">
+              Reject
+            </Button>
+            <Button onClick={handleAccept} color="primary" variant="contained">
+              Accept
+            </Button>
+          </DialogActions>
+        </Dialog>
       )}
 
-      {/* Active Call Modal */}
+      {/*Audio incoming Call Dialog */}
+      {AudioCallIncoming && !isAudioCallActive && (
+        <Dialog open onClose={handleReject}
+        >
+          <DialogTitle>📞</DialogTitle>
+          <DialogContent>
+            <Typography>
+              Agent <strong>{AudioCallIncoming.from}</strong> is calling you...
+            </Typography>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={handleReject} color="error" variant="outlined">
+              Reject
+            </Button>
+            <Button onClick={handleAcceptAudio} color="primary" variant="contained">
+              Accept
+            </Button>
+          </DialogActions>
+          </Dialog>
+      )}
+      
+
+      {/* Audio Call modal */}
+      {isAudioCallActive && (
+        <AudioCallModal
+          open={isAudioCallActive}
+          onClose={handleEndCall}
+          localVideoRef={audioLocalVideoRef}
+          remoteVideoRef={audioRemoteVideoRef}
+          />
+      )}
+
+      {/* Video Call Modal */}
       {isCallActive && (
-        <CallModal
-          open
-          callType={activeCallType}
-          localRef={activeCallType === "audio" ? localAudioRef : localVideoRef}
-          remoteRef={activeCallType === "audio" ? remoteAudioRef : remoteVideoRef}
-          username={incomingCall?.from || "Agent"}
-          callTimer={callTimer}
-          muted={muted}
-          cameraOff={videoOff}
-          toggleMute={toggleMute}
-          toggleCamera={toggleVideo}
-          endCall={handleStopCall}
-        />
+        <VideoCallModal
+          open={isCallActive}
+          onClose={handleEndCall}
+          localVideoRef={localVideoRef}
+          remoteVideoRef={remoteVideoRef}
+          // callActive={isCallActive}
+          // callTimer={callTimer}
+          // muted={muted}
+          // cameraOff={cameraOff}
+          // toggleMute={toggleMute}
+          // toggleCamera={toggleCamera}
+          // endCall={handleEndCall}
+          />
       )}
-
-      {/* Chat Area */}
-      <Box sx={{ height: "87.7vh", flexGrow: 1, position: "relative" }}>
-        {showChat && (
-          <Box
-            sx={{
-              position: "absolute",
-              top: "50%",
-              left: "50%",
-              transform: "translate(-50%, -50%)",
-              zIndex: 999,
-            }}
-          >
-            <ChatBot />
-          </Box>
-        )}
-
-        {/* Floating Chat Icon */}
-        <SpeedDial
-          ariaLabel="Chat"
-          sx={{ position: "absolute", bottom: 16, right: 16 }}
-          icon={<Chat />}
-          onClick={() => setShowChat((prev) => !prev)}
-        />
-      </Box>
     </>
   );
 }
